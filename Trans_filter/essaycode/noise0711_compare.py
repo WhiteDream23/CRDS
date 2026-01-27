@@ -58,7 +58,7 @@ def check_linearity_of_variance(fitted_curve, residuals, r_squared_threshold=0.8
     except:
         return False
 
-
+#返回了R2值
 def check_linearity_of_variance2(fitted_curve, residuals, r_squared_threshold=0.8, nums_box=11):
     try:
         binner = np.linspace(np.min(fitted_curve), np.max(fitted_curve), num=nums_box + 1)
@@ -221,78 +221,6 @@ def plot_inter_condition_stability(plot_data, output_path, analysis_config, meth
     plt.close(fig)
 
 
-def plot_subsampling_effect(plot_data, output_path, methods):
-    """【新增】绘制子采样数量对稳定性影响的图。"""
-    fig, ax = plt.subplots(figsize=(12, 8))
-    styles = {
-        # --- 上图：所有信号的拟合结果 (实线) ---
-        'WLS': {'color': 'blue', 'marker': 'o', 'linestyle': '-', 'zorder': 3},
-        'OLS': {'color': 'green', 'marker': 's', 'linestyle': '-', 'zorder': 2},
-        'robust': {'color': 'red', 'marker': '^', 'linestyle': '-', 'zorder': 1},
-        'WLS_QC': {'color': 'blue', 'marker': 'o', 'linestyle': '--', 'zorder': 3},
-        'OLS_QC': {'color': 'green', 'marker': 's', 'linestyle': '--', 'zorder': 2},
-        'robust_QC': {'color': 'red', 'marker': '^', 'linestyle': '--', 'zorder': 1}
-    }
-
-
-    for name in methods:
-        if name in plot_data and plot_data[name]:
-            # plot_data[name] 是一个 (n_signals, avg_std) 元组的列表
-            x_vals, y_vals = zip(*sorted(plot_data[name]))
-            ax.plot(x_vals, y_vals, label=name, **styles.get(name, {}))
-
-    ax.set_xlabel("用于统计的信号数量 (Number of Signals)", fontsize=14)
-    ax.set_ylabel("平均 Tau (τ) 标准差 (衡量稳定性)", fontsize=14)
-    ax.set_title("信号数量对拟合结果稳定性的影响", fontsize=16)
-    ax.legend(title="方法", fontsize=12)
-    ax.grid(True, which='both', linestyle='--', linewidth=0.5)
-    plt.tight_layout()
-    plt.savefig(output_path / "subsampling_stability_comparison.png", dpi=300)
-    plt.close(fig)
-
-
-def plot_std_distribution_for_subsample(df, n_signals, output_path, methods):
-    """【新增】为特定的子采样数量，绘制各文件tau_std的分布图。"""
-    fig, ax = plt.subplots(figsize=(15, 8))
-
-    # 提取批次号作为X轴
-    try:
-        df['batch_number'] = df['filename'].str.findall(r'(\d+)').str[-1].astype(int)
-        df = df.sort_values('batch_number')
-        x_axis = df['batch_number']
-    except (TypeError, IndexError):
-        # 如果无法从文件名提取数字，则使用行索引作为X轴
-        x_axis = np.arange(len(df))
-
-    styles = {
-        # 'WLS': {'color': 'blue', 'marker': 'o', 'linestyle': '-', 'zorder': 3},
-        # 'OLS': {'color': 'green', 'marker': 's', 'linestyle': '--', 'zorder': 2},
-        # 'WLS_QC': {'color': 'cyan', 'marker': 'D', 'linestyle': '-', 'zorder': 5, 'markersize': 4},
-        # 'OLS_QC': {'color': 'lime', 'marker': 'X', 'linestyle': '--', 'zorder': 4, 'markersize': 5}
-        'WLS': {'color': 'blue', 'marker': 'o', 'linestyle': '-', 'zorder': 3},
-        'OLS': {'color': 'green', 'marker': 's', 'linestyle': '-', 'zorder': 2},
-        'robust': {'color': 'red', 'marker': '^', 'linestyle': '-', 'zorder': 1},
-        'WLS_QC': {'color': 'blue', 'marker': 'o', 'linestyle': '--', 'zorder': 3},
-        'OLS_QC': {'color': 'green', 'marker': 's', 'linestyle': '--', 'zorder': 2},
-        'robust_QC': {'color': 'red', 'marker': '^', 'linestyle': '--', 'zorder': 1}
-    }
-
-    for method in methods:
-        ax.plot(x_axis, df[f'tau_std_{method}'], label=method, alpha=0.8, **styles.get(method, {}))
-
-    ax.set_title(f"Tau标准差分布 (当使用 {n_signals} 个信号时)", fontsize=16)
-    ax.set_xlabel("文件批次号 (Batch Number)", fontsize=12)
-    ax.set_ylabel("Tau (τ) 标准差")
-    ax.legend(title="拟合方法")
-    ax.grid(True, which='both', linestyle='--', alpha=0.6)
-
-    # 优化X轴刻度显示
-    ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True, nbins=min(30, len(x_axis))))
-    plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
-
-    plt.tight_layout()
-    plt.savefig(output_path / f"std_distribution_N_{n_signals}.png", dpi=150)
-    plt.close(fig)
 
 # --- 5. 主分析流程 (最终改造版) ---
 def run_analysis_suite_final(base_data_path, output_path, analysis_config):
@@ -428,405 +356,6 @@ def calculate_r_squared(y_true, y_pred):
     ss_res = np.sum(residuals**2)
     ss_tot = np.sum((y_true - np.mean(y_true))**2)
     return 1 - (ss_res / ss_tot)
-
-def plot_qc_verification(t_axis, signal, params, method_name, qc_passed, r2_val, output_path, filename, signal_idx):
-    """
-    【新增】生成详细的QC验证图：
-    1. 原始信号 vs 拟合曲线
-    2. 残差图
-    3. 噪声方差 vs 信号强度 (QC的核心依据)
-    """
-    fitted_curve = decay_model(t_axis, *params)
-    residuals = signal - fitted_curve
-    
-    # --- 重新计算方差-强度关系 (用于绘图) ---
-    nums_box = 11
-    binner = np.linspace(np.min(fitted_curve), np.max(fitted_curve), num=nums_box + 1)
-    bin_centers, bin_variances = [], []
-    for i in range(len(binner) - 1):
-        indices = np.where((fitted_curve >= binner[i]) & (fitted_curve < binner[i + 1]))[0]
-        if len(indices) > 10:
-            bin_centers.append((binner[i] + binner[i + 1]) / 2)
-            bin_variances.append(np.var(residuals[indices]))
-    
-    # 线性拟合方差图
-    slope, intercept, r_val_var, _, _ = linregress(bin_centers, bin_variances) if len(bin_centers) > 2 else (0,0,0,0,0)
-    var_line_fit = np.array(bin_centers) * slope + intercept
-
-    # --- 绘图 ---
-    fig = plt.figure(figsize=(12, 10))
-    gs = gridspec.GridSpec(3, 2, height_ratios=[2, 1, 2])
-    
-    # 1. 信号拟合图 (占据顶部整行)
-    ax1 = fig.add_subplot(gs[0, :])
-    ax1.plot(t_axis, signal, 'k.', markersize=2, alpha=0.3, label='Raw Signal')
-    ax1.plot(t_axis, fitted_curve, 'r-', linewidth=1.5, label=f'Fit ({method_name})')
-    ax1.set_title(f"Signal Fit | File: {filename} | Idx: {signal_idx}\nQC Result: {'PASS' if qc_passed else 'FAIL'} | R² = {r2_val:.6f} | Tau = {params[1]:.4f} us")
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-
-    # 2. 残差图 (占据中间整行)
-    ax2 = fig.add_subplot(gs[1, :], sharex=ax1)
-    ax2.plot(t_axis, residuals, 'b-', alpha=0.6, linewidth=0.8)
-    ax2.axhline(0, color='k', linestyle='--', alpha=0.5)
-    ax2.set_ylabel("Residuals")
-    ax2.grid(True, alpha=0.3)
-
-    # 3. 噪声方差 vs 信号强度 (左下)
-    ax3 = fig.add_subplot(gs[2, 0])
-    ax3.scatter(bin_centers, bin_variances, c='blue', label='Binned Variance')
-    ax3.plot(bin_centers, var_line_fit, 'r--', label=f'Linear Fit (Slope={slope:.2e})')
-    ax3.set_xlabel("Signal Intensity (V)")
-    ax3.set_ylabel("Noise Variance ($\sigma^2$)")
-    ax3.set_title(f"QC Criterion: Variance Linearity\n(Var R²={r_val_var**2:.4f})")
-    ax3.legend()
-    ax3.grid(True, alpha=0.3)
-
-    # 4. 说明文字 (右下)
-    ax4 = fig.add_subplot(gs[2, 1])
-    ax4.axis('off')
-    text_info = (
-        f"Analysis:\n"
-        f"----------------\n"
-        f"Method: {method_name}\n"
-        f"Fit R²: {r2_val:.6f}\n"
-        f"QC Status: {'PASSED' if qc_passed else 'FAILED'}\n\n"
-        f"Why check Variance?\n"
-        f"Ideally, noise variance scales linearly\n"
-        f"with intensity (Shot Noise).\n"
-        f"Non-linear or negative slope indicates\n"
-        f"external interference (e.g. fringes)."
-    )
-    ax4.text(0.1, 0.5, text_info, fontsize=11, va='center', family='monospace')
-
-    plt.tight_layout()
-    
-    # 保存路径区分
-    sub_folder = "QC_Passed" if qc_passed else "QC_Failed"
-    if r2_val > 0.99 and not qc_passed: sub_folder = "QC_Deceptive_HighR2_Fail" # 特殊类别
-    
-    save_dir = output_path / "QC_Verification_Plots" / sub_folder
-    save_dir.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_dir / f"{filename}_idx{signal_idx}_{method_name}.png", dpi=100)
-    plt.close(fig)
-
-def plot_qc_verification2(t_axis, signal, params, method_name, qc_passed, r2_val, output_path, filename, signal_idx):
-    """
-    【修改版】生成符合期刊发表标准的矢量图：
-    图1: 信号拟合曲线 + 残差 (双子图)
-    图2: 噪声方差 vs 信号强度 (单图)
-    """
-    # --- 0. 准备数据 ---
-    fitted_curve = decay_model(t_axis, *params)
-    residuals = signal - fitted_curve
-    
-    # 计算方差-强度关系
-    nums_box = 11
-    binner = np.linspace(np.min(fitted_curve), np.max(fitted_curve), num=nums_box + 1)
-    bin_centers, bin_variances = [], []
-    for i in range(len(binner) - 1):
-        indices = np.where((fitted_curve >= binner[i]) & (fitted_curve < binner[i + 1]))[0]
-        if len(indices) > 10:
-            bin_centers.append((binner[i] + binner[i + 1]) / 2)
-            bin_variances.append(np.var(residuals[indices]))
-    
-    # 线性拟合方差图
-    slope, intercept, r_val_var, _, _ = linregress(bin_centers, bin_variances) if len(bin_centers) > 2 else (0,0,0,0,0)
-    var_line_fit = np.array(bin_centers) * slope + intercept
-    var_r2 = r_val_var**2
-
-    # --- 1. 设置期刊绘图风格 (局部设置，不影响全局) ---
-    with plt.rc_context({
-        'font.family': 'sans-serif',
-        'font.sans-serif': ['Arial', 'Helvetica'], # 学术常用无衬线字体
-        'mathtext.fontset': 'stix',
-        'axes.linewidth': 1.2, # 稍微加粗坐标轴边框
-        'xtick.direction': 'in',
-        'ytick.direction': 'in',
-        'xtick.top': False,
-        'ytick.right': False,
-        'xtick.labelsize': 14, # 增大刻度字体
-        'ytick.labelsize': 14,
-        'axes.labelsize': 16   # 增大轴标签字体
-    }):
-        
-        # 确定保存路径
-        sub_folder = "QC_Passed" if qc_passed else "QC_Failed"
-        if r2_val > 0.99 and not qc_passed: sub_folder = "QC_Deceptive_HighR2_Fail"
-        save_dir = output_path / "QC_Verification_Plots" / sub_folder
-        save_dir.mkdir(parents=True, exist_ok=True)
-
-        # ==========================================
-        # 图 1: 信号拟合与残差 (Signal Fit & Residuals)
-        # ==========================================
-        fig1 = plt.figure(figsize=(8, 6))
-        gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1], hspace=0.05)
-        
-        # 上图：拟合曲线
-        ax1 = fig1.add_subplot(gs[0])
-        ax1.plot(t_axis, signal, 'o', color='gray', markersize=3, alpha=0.5, label='Raw Data', markeredgewidth=0)
-        ax1.plot(t_axis, fitted_curve, color='#D62728', linewidth=2.0, label='Exponential Fit') # 砖红色
-        
-        # 标记信息 (QC Result, R2, Tau)
-        info_text = (
-            f"QC Result: {'PASS' if qc_passed else 'FAIL'}\n"
-            f"$R^2_{{signal}}$ = {r2_val:.5f}\n"
-            f"$\\tau$ = {params[1]:.4f} $\\mu s$"
-        )
-        # 【修改点1】将信息框移到正中间 (0.5, 0.5)
-        ax1.text(0.5, 0.85, info_text, transform=ax1.transAxes, 
-                 ha='center', va='top', fontsize=20, fontweight='normal',
-                 bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.95, edgecolor='black', linewidth=1.5))
-        
-        # 【修改点2】在右上角添加 (a)
-        ax1.text(0.96, 0.94, '(a)', transform=ax1.transAxes, 
-                 ha='right', va='top', fontsize=20, fontweight='bold')
-        
-        ax1.yaxis.set_major_locator(ticker.MaxNLocator(nbins=5)) # Y轴最多5个刻度
-        ax1.set_ylabel("Signal Intensity (V)")
-        ax1.tick_params(labelbottom=False) 
-        ax1.legend(loc='center right', frameon=False, fontsize=12)
-        
-        # 下图：残差
-        ax2 = fig1.add_subplot(gs[1], sharex=ax1)
-        ax2.plot(t_axis, residuals, '-', color='#1F77B4', linewidth=1.0, alpha=0.9) # 深蓝色
-        ax2.axhline(0, color='black', linestyle='--', linewidth=1.0, alpha=0.6)
-        
-        max_resid = np.max(np.abs(residuals))
-        if max_resid == 0: max_resid = 1e-6 # 防止除零或无效范围
-        limit = max_resid * 1.1 # 留出 10% 的边距
-        ax2.set_ylim(-limit, limit)
-        
-        ax2.yaxis.set_major_locator(ticker.MaxNLocator(nbins=4)) # Y轴最多5个刻度
-        ax2.xaxis.set_major_locator(ticker.MaxNLocator(nbins=6)) # X轴最多6个刻度
-       
-
-
-        ax2.set_ylabel("Residuals")
-        ax2.set_xlabel("Time ($\\mu s$)")
-        
-        # 调整布局并保存
-        plt.tight_layout()
-        # fig1.savefig(save_dir / f"{filename}_idx{signal_idx}_Fit.pdf", format='pdf', bbox_inches='tight')
-        fig1.savefig(save_dir / f"{filename}_idx{signal_idx}_Fit.png", format='png', dpi=300, bbox_inches='tight')
-        plt.close(fig1)
-
-        # ==========================================
-        # 图 2: 噪声方差 vs 信号强度 (Variance vs Intensity)
-        # ==========================================
-        fig2, ax3 = plt.subplots(figsize=(6, 5))
-        
-        # 散点
-        ax3.scatter(bin_centers, bin_variances, c='black', s=50, marker='o', label='Binned Variance', zorder=3)
-        # 拟合线
-        ax3.plot(bin_centers, var_line_fit, linestyle='--', color='#D62728', linewidth=2.0, label='Linear Fit', zorder=2)
-        
-        # 标记信息 (Fit R2, QC Result)
-        var_info_text = (
-            f"QC Result: {'PASS' if qc_passed else 'FAIL'}\n"
-            f"$R^2_{{linear}}$ = {var_r2:.4f}"
-        )
-        # 放置在左上角或右下角 (根据斜率避开数据)
-        loc_pos = 'upper left' if slope < 0 else 'lower right'
-        x_pos = 0.04 if slope < 0 else 0.96
-        y_pos = 0.96 if slope < 0 else 0.04
-        ha_align = 'left' if slope < 0 else 'right'
-        va_align = 'top' if slope < 0 else 'bottom'
-
-        # 【修改点】放大字体(14)，加粗边框
-        ax3.text(x_pos, y_pos, var_info_text, transform=ax3.transAxes,
-                 ha=ha_align, va=va_align, fontsize=20, fontweight='normal',
-                 bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.95, edgecolor='black', linewidth=1.5))
-        ax3.text(0.1, 0.94, '(b)', transform=ax3.transAxes, 
-            ha='right', va='top', fontsize=20, fontweight='bold')
-        ax3.yaxis.set_major_locator(ticker.MaxNLocator(nbins=5)) # Y轴最多5个刻度
-        ax3.xaxis.set_major_locator(ticker.MaxNLocator(nbins=6)) # X轴最多6个刻度
-        ax3.set_ylabel("Noise Variance ($\\sigma^2$)")
-        ax3.set_xlabel("Signal Intensity (V)")
-        
-        # 【修改点】纵轴强制使用科学计数法
-        ax3.ticklabel_format(axis='y', style='sci', scilimits=(0,0), useMathText=True)
-        ax3.yaxis.get_offset_text().set_fontsize(12) # 调整指数部分的字体大小
-
-        # 简单的网格
-        ax3.grid(True, linestyle=':', alpha=0.3)
-        
-        plt.tight_layout()
-        # fig2.savefig(save_dir / f"{filename}_idx{signal_idx}_Var.pdf", format='pdf', bbox_inches='tight')
-        fig2.savefig(save_dir / f"{filename}_idx{signal_idx}_Var.png", format='png', dpi=300, bbox_inches='tight')
-        plt.close(fig2)
-
-
-def plot_qc_verification_combined(t_axis, signal, params, method_name, qc_passed, r2_val, output_path, filename, signal_idx):
-    """
-    【新增】生成左右并排的组合图 (Combined Plot)：
-    左图: 信号拟合曲线 + 残差 (上下子图)
-    右图: 噪声方差 vs 信号强度
-    特点: 字体清晰，布局紧凑，适合期刊发表
-    """
-    fitted_curve = decay_model(t_axis, *params)
-    residuals = signal - fitted_curve
-    
-    # 计算方差-强度关系
-    nums_box = 11
-    binner = np.linspace(np.min(fitted_curve), np.max(fitted_curve), num=nums_box + 1)
-    bin_centers, bin_variances = [], []
-    for i in range(len(binner) - 1):
-        indices = np.where((fitted_curve >= binner[i]) & (fitted_curve < binner[i + 1]))[0]
-        if len(indices) > 10:
-            bin_centers.append((binner[i] + binner[i + 1]) / 2)
-            bin_variances.append(np.var(residuals[indices]))
-    
-    # 线性拟合方差图
-    slope, intercept, r_val_var, _, _ = linregress(bin_centers, bin_variances) if len(bin_centers) > 2 else (0,0,0,0,0)
-    var_line_fit = np.array(bin_centers) * slope + intercept
-    var_r2 = r_val_var**2
-
-    # --- 1. 设置绘图风格 ---
-    with plt.rc_context({
-        'font.family': 'sans-serif',
-        'font.sans-serif': ['Arial', 'Helvetica'],
-        'mathtext.fontset': 'stix',
-        'axes.linewidth': 1.2,
-        'xtick.direction': 'in',
-        'ytick.direction': 'in',
-        'xtick.top': False,
-        'ytick.right': False,
-        'xtick.labelsize': 16,
-        'ytick.labelsize': 16,
-        'axes.labelsize': 16,
-        'legend.fontsize': 18
-    }):
-        
-        # 确定保存路径
-        sub_folder = "QC_Passed" if qc_passed else "QC_Failed"
-        if r2_val > 0.99 and not qc_passed: sub_folder = "QC_Deceptive_HighR2_Fail"
-        save_dir = output_path / "QC_Verification_Plots" / sub_folder
-        save_dir.mkdir(parents=True, exist_ok=True)
-
-        # 创建宽幅画布: 16x7 英寸
-        fig = plt.figure(figsize=(16, 6))
-        
-        # 使用 GridSpec 定义布局: 1行2列，左列再分为上下两行(3:1)
-        gs_main = gridspec.GridSpec(1, 2, width_ratios=[1.1, 1], wspace=0.02, left=0.05, right=0.98, top=0.92, bottom=0.1)
-        gs_left = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs_main[0], height_ratios=[3, 1], hspace=0.05)
-        
-        # ==========================================
-        # 左侧部分 (a): 信号拟合与残差
-        # ==========================================
-        
-        # 左上: 拟合曲线
-        ax1 = fig.add_subplot(gs_left[0])
-        ax1.plot(t_axis, signal, 'o', color='gray', markersize=4, alpha=0.4, label='Raw Data', markeredgewidth=0)
-        ax1.plot(t_axis, fitted_curve, color='#D62728', linewidth=2.5, label='Exponential Fit')
-        
-        # 标记信息 (左图)
-        info_text_1 = (
-            f"QC Result: {'PASS' if qc_passed else 'FAIL'}\n"
-            f"$R^2_{{signal}}$ = {r2_val:.5f}\n"
-            f"$\\tau$ = {params[1]:.4f} $\\mu s$"
-        )
-        # 信息框位置：中间偏上
-        ax1.text(0.5, 0.85, info_text_1, transform=ax1.transAxes, 
-                 ha='center', va='top', fontsize=20, fontweight='normal',
-                 bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.95, edgecolor='black', linewidth=1.5))
-        
-        # 标记 (a) - 右上角
-        # ax1.text(0.96, 0.96, '(a)', transform=ax1.transAxes, 
-        #          ha='right', va='top', fontsize=20, fontweight='bold')
-        # ax1.legend(loc='upper right', bbox_to_anchor=(1.02, 0.88), frameon=False)
-        
-        ax1.yaxis.set_major_locator(ticker.MaxNLocator(nbins=5))
-        ax1.set_ylabel("Signal Intensity (V)", fontsize=18)
-        ax1.tick_params(labelbottom=False) 
-        
-        # 左下: 残差
-        ax2 = fig.add_subplot(gs_left[1], sharex=ax1)
-        ax2.plot(t_axis, residuals, '-', color='#1F77B4', linewidth=1.2, alpha=0.9)
-        ax2.axhline(0, color='black', linestyle='--', linewidth=1.2, alpha=0.6)
-        
-        # 残差图设置 (对称和刻度)
-        max_resid = np.max(np.abs(residuals))
-        if max_resid == 0: max_resid = 1e-6
-        limit = max_resid * 1.1
-        ax2.set_ylim(-limit, limit)
-        ax2.yaxis.set_major_locator(ticker.MaxNLocator(nbins=4))
-        ax2.xaxis.set_major_locator(ticker.MaxNLocator(nbins=6))
-
-        ax2.set_ylabel("Residuals", fontsize=18)
-        ax2.set_xlabel("Time ($\\mu s$)", fontsize=18)
-        
-        # ==========================================
-        # 右侧部分 (b): 噪声方差 vs 信号强度
-        # ==========================================
-        ax3 = fig.add_subplot(gs_main[1])
-        ax3.set_box_aspect(1)  # 保持长宽比为1:1
-        # 散点与拟合线
-        ax3.scatter(bin_centers, bin_variances, c='black', s=80, marker='o', label='Binned Variance', zorder=3, edgecolors='white')
-        ax3.plot(bin_centers, var_line_fit, linestyle='--', color='#D62728', linewidth=2.5, label='Linear Fit', zorder=2)
-        
-        # 标记信息 (右图)
-        info_text_2 = (
-            f"QC Result: {'PASS' if qc_passed else 'FAIL'}\n"
-            f"$R^2_{{linear}}$ = {var_r2:.4f}"
-        )
-        
-        # 智能放置位置
-        loc_pos = 'upper left' if slope < 0 else 'lower right'
-        x_pos = 0.1 if slope < 0 else 0.96
-        y_pos = 0.96 if slope < 0 else 0.1
-        ha_align = 'left' if slope < 0 else 'right'
-        va_align = 'top' if slope < 0 else 'bottom'
-
-        ax3.text(x_pos, y_pos, info_text_2, transform=ax3.transAxes,
-                 ha=ha_align, va=va_align, fontsize=20, fontweight='normal',
-                 bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.95, edgecolor='black', linewidth=1.5))
-
-        # 标记 (b) - 左上角
-        # ax3.text(0.04, 0.96, '(b)', transform=ax3.transAxes, 
-        #          ha='left', va='top', fontsize=20, fontweight='bold')
-        ax3.xaxis.set_major_locator(ticker.MaxNLocator(nbins=5))
-        ax3.yaxis.set_major_locator(ticker.MaxNLocator(nbins=5))
-        ax3.set_ylabel("Noise Variance ($\\sigma^2$)", fontsize=18)
-        ax3.set_xlabel("Signal Intensity (V)", fontsize=18)
-        
-        # 科学计数法
-        ax3.ticklabel_format(axis='y', style='sci', scilimits=(0,0), useMathText=True)
-        ax3.yaxis.get_offset_text().set_fontsize(14)
-        ax3.grid(True, linestyle=':', alpha=0.4)
-        fig.text(0.52, 0.91, '(a)', ha='right', va='top', fontsize=24, fontweight='bold')
-        
-        # 右图角标 (b) - 放在右侧区域的右上角
-        # x=0.96 (右图右边缘附近), y=0.95 (与(a)高度完全一致)
-        fig.text(0.65, 0.91, '(b)', ha='right', va='top', fontsize=24, fontweight='bold')
-        # 左图图例 - 放在 (a) 下方
-        # 使用 ax1.legend 但指定 bbox_to_anchor 为画布坐标是不行的，
-        # 必须使用 fig.legend 或者技巧性地调整 bbox_to_anchor
-        # 这里我们使用最稳健的方法：在 ax1 上画，但手动微调 bbox_to_anchor
-        # 因为 ax1 的顶部不是画布顶部，所以需要把 y 设得比 1 大一点，或者使用 fig.legend
-        
-        # 方法A: 使用 fig.legend (推荐，绝对对齐)
-        handles1, labels1 = ax1.get_legend_handles_labels()
-        fig.legend(handles1, labels1, loc='upper right', bbox_to_anchor=(0.54, 0.88), frameon=False)
-        
-        handles3, labels3 = ax3.get_legend_handles_labels()
-        fig.legend(handles3, labels3, loc='upper right', bbox_to_anchor=(0.80, 0.88), frameon=False)
-
-        
-
-
-        # ==========================================
-        # 保存
-        # ==========================================
-        sub_folder = "QC_Passed" if qc_passed else "QC_Failed"
-        if r2_val > 0.99 and not qc_passed: sub_folder = "QC_Deceptive_HighR2_Fail"
-        save_dir = output_path / "QC_Verification_Plots_Combined" / sub_folder
-        save_dir.mkdir(parents=True, exist_ok=True)
-        
-        plt.savefig(save_dir / f"{filename}_idx{signal_idx}_Combined.png", format='png', dpi=300, bbox_inches='tight')
-        # plt.savefig(save_dir / f"{filename}_idx{signal_idx}_Combined.pdf", format='pdf', bbox_inches='tight')
-        plt.close(fig)
-
 
 def plot_qc_verification_combined_finalimg(t_axis, signal, params, method_name, qc_passed, r2_val, output_path, filename, signal_idx):
     """
@@ -1080,118 +609,6 @@ def plot_r2_distribution(r2_values, output_path, filename, condition_value):
     plt.savefig(save_dir / f"R2_Dist_{filename}.png", dpi=150)
     plt.close(fig)
 
-def run_subsampling_analysis(data_folder_path, output_path, subsample_sizes, time_per_point, r2_threshold):
-    """【修改版】执行子采样分析，并为每个子采样数量生成std分布图，同时保存均值和标准差的统计。"""
-    output_path = Path(output_path) / "subsampling_analysis"
-    dist_plots_path = output_path / "std_vs_batch_plots"
-    output_path.mkdir(parents=True, exist_ok=True)
-    dist_plots_path.mkdir(parents=True, exist_ok=True)
-
-    npz_files = sorted(list(Path(data_folder_path).glob("*.npz")), key=natural_sort_key)
-    if not npz_files: print(f"错误: 在 '{data_folder_path}' 未找到NPZ文件。"); return
-
-    print("\n--- 开始 '子采样分析' (包含std分布图和均值统计) ---")
-
-    methods = ['WLS', 'OLS', 'WLS_QC', 'OLS_QC', 'robust', 'robust_QC']
-
-    # --- 修改：为std和mean分别创建数据容器 ---
-    master_std_data = defaultdict(list)
-    master_mean_data = defaultdict(list)
-
-    for n_signals in tqdm(subsample_sizes, desc="测试不同子采样数量"):
-        results_for_n_signals = []
-
-        for npz_file in tqdm(npz_files,desc='处理文件'):
-            # ... (文件加载和子采样逻辑无变化)
-            with np.load(npz_file) as ld:
-                signals = ld.get('data', ld.get('arr_0'))
-            if signals.ndim == 1: signals = [signals]
-            total_signals_in_file = len(signals)
-            if total_signals_in_file < n_signals: continue
-
-            start = 0  # 从头开始取样
-            if start + n_signals > total_signals_in_file:
-                tqdm.write(f"文件 {npz_file.name} 信号总数不够，已跳过。")
-                continue
-
-            subsampled_signals = signals[start: start + n_signals]
-            t_axis = np.linspace(0, len(subsampled_signals[0]) * time_per_point, len(subsampled_signals[0]))
-
-            taus_per_file = defaultdict(list)
-            for signal in subsampled_signals:
-                wls_params = fit_wls(signal, t_axis)
-                ols_params = fit_ols(signal, t_axis)
-                robust_params = fit_robust(signal, t_axis)
-                if wls_params is not None:
-                    qc_passed_wls = check_linearity_of_variance(decay_model(t_axis, *wls_params),
-                                                                signal - decay_model(t_axis, *wls_params), r2_threshold)
-                    if qc_passed_wls: taus_per_file['WLS_QC'].append(wls_params[1])
-                    taus_per_file['WLS'].append(wls_params[1])
-                if ols_params is not None:
-                    qc_passed_ols = check_linearity_of_variance(decay_model(t_axis, *ols_params),
-                                                                signal - decay_model(t_axis, *ols_params), r2_threshold)
-                    if qc_passed_ols: taus_per_file['OLS_QC'].append(ols_params[1])
-                    taus_per_file['OLS'].append(ols_params[1])
-                if robust_params is not None:
-                    qc_passed_robust = check_linearity_of_variance(decay_model(t_axis, *robust_params),
-                                                                   signal - decay_model(t_axis, *robust_params),
-                                                                   r2_threshold)
-                    if qc_passed_robust: taus_per_file['robust_QC'].append(robust_params[1])
-                    taus_per_file['robust'].append(robust_params[1])
-
-            # --- 修改：同时计算并保存均值和标准差 ---
-            file_summary_for_n = {'filename': npz_file.name}
-            for name in methods:
-                taus = taus_per_file[name]
-                std_tau = np.std(taus) if len(taus) > 1 else 0
-                mean_tau = np.mean(taus) if taus else np.nan
-                file_summary_for_n[f'tau_std_{name}'] = std_tau
-                file_summary_for_n[f'tau_mean_{name}'] = mean_tau  # 新增
-            results_for_n_signals.append(file_summary_for_n)
-
-        if results_for_n_signals:
-            df_n = pd.DataFrame(results_for_n_signals)
-            plot_std_distribution_for_subsample(df_n, n_signals, dist_plots_path, methods) # 绘图函数保持不变
-
-            # --- 修改：分别聚合std和mean ---
-            for name in methods:
-                # 聚合std
-                std_series = df_n[f'tau_std_{name}']
-                valid_stds = std_series[std_series > 0]
-                mean_std = valid_stds.mean() if not valid_stds.empty else np.nan
-                master_std_data[name].append((n_signals, mean_std))
-
-                # 聚合mean
-                mean_series = df_n[f'tau_mean_{name}']
-                valid_means = mean_series.dropna()
-                mean_mean = valid_means.mean() if not valid_means.empty else np.nan
-                master_mean_data[name].append((n_signals, mean_mean))
-
-    # --- 修改：合并std和mean的结果到最终报告 ---
-    plot_subsampling_effect(master_std_data, output_path, methods) # 绘图函数保持不变
-
-    # 1. 从std数据创建DataFrame
-    report_data_std = []
-    for name, data_list in master_std_data.items():
-        for n_s, avg_std in data_list:
-            report_data_std.append({'method': name, 'num_signals': n_s, 'average_tau_std': avg_std})
-    df_std = pd.DataFrame(report_data_std)
-
-    # 2. 从mean数据创建DataFrame
-    report_data_mean = []
-    for name, data_list in master_mean_data.items():
-        for n_s, avg_mean in data_list:
-            report_data_mean.append({'method': name, 'num_signals': n_s, 'average_tau_mean': avg_mean})
-    df_mean = pd.DataFrame(report_data_mean)
-
-    # 3. 合并两个DataFrame
-    if not df_std.empty and not df_mean.empty:
-        report_df = pd.merge(df_std, df_mean, on=['method', 'num_signals'])
-        report_df.to_csv(output_path / "subsampling_report.csv", index=False, float_format='%.6f', encoding='utf-8-sig')
-        tqdm.write(f"\n'子采样分析' 的报告和图像已保存至: {output_path}")
-    else:
-        tqdm.write("\n未能生成有效的报告数据。")
-
 #函数添加了有关R2的分析，没有包含随机策略的分析
 def run_analysis_suite_final_2(base_data_path, output_path, analysis_config):
     # 从配置中解包参数
@@ -1210,11 +627,6 @@ def run_analysis_suite_final_2(base_data_path, output_path, analysis_config):
     if not data_folders: print(f"错误: 未找到 '{folder_prefix}*' 文件夹。"); return
 
     print(f"\n--- 开始 '{analysis_type.upper()}' 分析 (独立QC, 动态 t_end) ---")
-
-    master_summary_list = []
-    stability_plot_data = defaultdict(lambda: {'x': [], 'mean_of_stds': []})
-    methods = ['WLS', 'OLS',  'WLS_QC', 'OLS_QC','robust', 'robust_QC']
-    # methods = ['OLS', 'OLS_QC','robust', 'robust_QC']
 
     # --- 新增：用于限制绘图数量的计数器 ---
     qc_plot_counters = {
@@ -1236,8 +648,6 @@ def run_analysis_suite_final_2(base_data_path, output_path, analysis_config):
 
         npz_files = sorted(list(folder.glob("*.npz")), key=natural_sort_key)
         if not npz_files: continue
-
-        folder_results, agg_stds = [], defaultdict(list)
 
         for npz_file in tqdm(npz_files,'处理NPZ文件', leave=False):
             try:
@@ -1310,43 +720,10 @@ def run_analysis_suite_final_2(base_data_path, output_path, analysis_config):
                         plot_qc_verification_combined_finalimg(t_axis, signal, ols_params, 'OLS', qc_passed_ols, r2_ols, output_path, npz_file.name, idx)
             plot_r2_distribution(r2_list_ols, output_path, npz_file.name, condition_value)
          
-            file_summary = {'filename': npz_file.name, 'condition': condition_value}
-            for name in methods:
-                taus = taus_per_file[name]
-                mean_tau, std_tau = (np.mean(taus), np.std(taus)) if len(taus) > 1 else (
-                np.mean(taus) if taus else np.nan, 0)
-                file_summary[f'tau_mean_{name}'], file_summary[f'tau_std_{name}'] = mean_tau, std_tau
-                if not np.isnan(std_tau): agg_stds[name].append(std_tau)
-
-            folder_results.append(file_summary)
         if all_r2_values:
             plot_r2_distribution(all_r2_values, output_path, "ALL_FILES_AGGREGATED", "ALL")
   
-        if folder_results:
-            folder_df = pd.DataFrame(folder_results).set_index('filename')
-            plot_intra_condition_comparison(folder_df, folder.name, output_path, analysis_type, methods)
 
-        for name in methods:
-            stability_plot_data[name]['x'].append(condition_value)
-            stability_plot_data[name]['mean_of_stds'].append(np.mean(agg_stds[name]) if agg_stds[name] else np.nan)
-
-        master_summary_list.extend(folder_results)
-
-    plot_inter_condition_stability(stability_plot_data, output_path, analysis_config, methods)
-    if master_summary_list:
-        # 修正后代码
-        # 1. 先创建DataFrame，不进行排序
-        report_df = pd.DataFrame(master_summary_list)
-
-        # 2. 为 'filename' 列创建一个临时的自然排序键列
-        report_df['filename_sort_key'] = report_df['filename'].apply(natural_sort_key)
-
-        # 3. 根据 'condition' 和新的排序键列进行排序，然后删除临时列
-        report_df = report_df.sort_values(by=['condition', 'filename_sort_key']).drop(columns=['filename_sort_key'])
-
-        report_path = output_path / f"{analysis_type}_main_report_final.csv"
-        report_df.to_csv(report_path, index=False, float_format='%.6f', encoding='utf-8-sig')
-        tqdm.write(f"'{analysis_type}' 的主报告和所有图像已保存至: {output_path}")
 
 
 def simulate_random_removal_stability(all_taus, n_keep, num_trials=100):
@@ -1495,7 +872,7 @@ def plot_qc_vs_random_trajectory(qc_vs_random_data, output_path, condition_name)
     plt.savefig(output_path / f"QC_vs_Random_vs_Raw_Trajectory_{condition_name}.png", dpi=150)
     plt.close(fig)
 
-
+#基本只用2/4
 def run_analysis_suite_final_3(base_data_path, output_path, analysis_config):
     # 从配置中解包参数
     analysis_type = analysis_config['type']
@@ -1626,11 +1003,6 @@ def run_analysis_suite_final_3(base_data_path, output_path, analysis_config):
                 if method in taus_per_file:
                     # 使用文件名作为唯一标识，追踪该文件在不同条件下的表现
                     file_trace_data[npz_file.name][method][condition_value].extend(taus_per_file[method])
-
-            
-
-
-            
             for name in methods:
                 taus = taus_per_file[name]
                 mean_tau, std_tau = (np.mean(taus), np.std(taus)) if len(taus) > 1 else (
@@ -1639,8 +1011,6 @@ def run_analysis_suite_final_3(base_data_path, output_path, analysis_config):
                 if not np.isnan(std_tau): agg_stds[name].append(std_tau)
 
             folder_results.append(file_summary)
-
-
 
         if folder_results:
             folder_df = pd.DataFrame(folder_results).set_index('filename')
@@ -1674,21 +1044,6 @@ def run_analysis_suite_final_3(base_data_path, output_path, analysis_config):
 
 
     plot_inter_condition_stability(stability_plot_data, output_path, analysis_config, methods)
-
-    print("正在生成单文件分布对比图...")
-    dist_plot_folder = output_path / "Per_File_Distributions"
-    dist_plot_folder.mkdir(parents=True, exist_ok=True)
-    
-    # 遍历所有追踪到的文件
-    for filename, method_data in tqdm(file_trace_data.items(), desc="绘图"):
-        # 检查是否有足够的数据（至少有一个条件下的数据）
-        if method_data['WLS_QC'] or method_data['OLS_QC']:
-            plot_tau_distribution_comparison(
-                method_data, 
-                dist_plot_folder, 
-                analysis_config, 
-                filename_tag=filename
-            )
 
     if master_summary_list:
         # 修正后代码
@@ -2086,16 +1441,6 @@ if __name__ == "__main__":
             analysis_config=config
         )
 
-    # --- 分析任务3：新增的子采样分析 ---
-    # SUBSAMPLING_TARGET_FOLDER = BASE_RAWDATA_PATH / "processed_len18000"
-    # SUBSAMPLE_SIZES = list(range(20, 301, 20)) # 从10, 20, ... 到 150
-    # SUBSAMPLE_SIZES =[100,200]
-    # run_subsampling_analysis(
-    #     data_folder_path=SUBSAMPLING_TARGET_FOLDER,
-    #     output_path=MAIN_OUTPUT_FOLDER,
-    #     subsample_sizes=SUBSAMPLE_SIZES,
-    #     time_per_point=TIME_PER_POINT,
-    #     r2_threshold=QC_R_SQUARED_THRESHOLD
-    # )
 
     print("\n所有最终版分析任务已执行完毕！")
+
