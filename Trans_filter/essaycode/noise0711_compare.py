@@ -563,7 +563,7 @@ def plot_qc_verification_combined_finalimg(t_axis, signal, params, method_name, 
         # plt.savefig(save_dir / f"{filename}_idx{signal_idx}_Combined.pdf", format='pdf', bbox_inches='tight')
         plt.close(fig)
 
-def plot_r2_distribution(r2_values, output_path, filename, condition_value):
+def plot_r2_distribution(r2_values, output_path, filename, condition_value,binnum):
     """
     【新增】绘制单个文件中所有信号的 R^2 分布直方图
     """
@@ -604,10 +604,133 @@ def plot_r2_distribution(r2_values, output_path, filename, condition_value):
     plt.tight_layout()
     
     # 保存路径
-    save_dir = output_path / "R2_Distributions"
+    save_dir = output_path / f"R2_Distributions_{binnum}"
     save_dir.mkdir(parents=True, exist_ok=True)
     plt.savefig(save_dir / f"R2_Dist_{filename}.png", dpi=150)
     plt.close(fig)
+
+
+def analyze_removal_effect_simple(data, removal_ratios=None, num_trials=100, plot=True, output_path=None,filename=None):
+    """
+    简单分析：测试不同随机剔除比例下的标准差变化
+
+    参数:
+    -----------
+    data : array-like
+        你的tau值数组
+    removal_ratios : array-like, optional
+        剔除比例列表，如 [0.1, 0.2, 0.3, 0.4, 0.5]
+        默认: np.linspace(0, 0.5, 11)  即 0%到50%，步长5%
+    num_trials : int
+        每个比例的重复次数，默认100
+    plot : bool
+        是否画图，默认True
+    output_path : str or Path, optional
+        图片保存路径
+
+    返回:
+    --------
+    dict : {
+        'n_total': 数据总数,
+        'std_original': 原始标准差,
+        'removal_ratios': 剔除比例数组,
+        'n_removed': 剔除数量数组,
+        'n_remaining': 剩余数量数组,
+        'std_after': 剔除后的标准差数组,
+        'std_change': 标准差变化率数组
+    }
+    """
+    data = np.array(data)
+    n_total = len(data)
+    std_original = np.std(data)
+
+    # 设置默认剔除比例
+    if removal_ratios is None:
+        removal_ratios = np.linspace(0, 0.9, 10)  # 0%, 5%, 10%, ..., 50%
+
+    removal_ratios = np.array(removal_ratios)
+
+    results = {
+        'n_total': n_total,
+        'std_original': std_original,
+        'removal_ratios': [],
+        'n_removed': [],
+        'n_remaining': [],
+        'std_after': [],
+        'std_change': []
+    }
+
+    for ratio in removal_ratios:
+        n_removed = int(n_total * ratio)
+        n_remaining = n_total - n_removed
+
+        if n_remaining < 2:
+            continue
+
+        # 复用现有的 simulate_random_removal_stability 函数
+        std_after = simulate_random_removal_stability(data, n_keep=n_remaining, num_trials=num_trials)
+
+        if not np.isnan(std_after):
+            results['removal_ratios'].append(ratio)
+            results['n_removed'].append(n_removed)
+            results['n_remaining'].append(n_remaining)
+            results['std_after'].append(std_after)
+            results['std_change'].append((std_after - std_original) / std_original * 100)
+
+    # 转为numpy数组
+    for key in ['removal_ratios', 'n_removed', 'n_remaining', 'std_after', 'std_change']:
+        results[key] = np.array(results[key])
+
+    if plot:
+        _plot_removal_effect_simple(results, output_path,filename,num_trials)
+
+    return results
+
+
+def _plot_removal_effect_simple(results, output_path=None,filename=None,num=None):
+    """绘制简单的剔除效果分析图"""
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+    ratios_pct = results['removal_ratios'] * 100
+    std_after = results['std_after']
+    std_original = results['std_original']
+    std_change = results['std_change']
+
+    # 子图1: 标准差随剔除比例变化
+    ax1 = axes[0]
+    ax1.plot(ratios_pct, std_after, 'bo-', linewidth=2, markersize=6, label='随机剔除后的std')
+    ax1.axhline(y=std_original, color='r', linestyle='--', linewidth=2, label=f'原始std={std_original:.4f}')
+    ax1.set_xlabel('剔除比例 (%)', fontsize=12)
+    ax1.set_ylabel('标准差', fontsize=12)
+    ax1.set_title('随机剔除对标准差的影响', fontsize=13, fontweight='bold')
+    ax1.legend(fontsize=11)
+    ax1.grid(True, alpha=0.3)
+
+    # 子图2: 标准差变化率
+    ax2 = axes[1]
+    ax2.plot(ratios_pct, std_change, 'gs-', linewidth=2, markersize=6)
+    ax2.axhline(y=0, color='gray', linestyle='--', linewidth=1)
+    ax2.set_xlabel('剔除比例 (%)', fontsize=12)
+    ax2.set_ylabel('标准差变化率 (%)', fontsize=12)
+    ax2.set_title('标准差相对变化', fontsize=13, fontweight='bold')
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    if output_path:
+        output_path = Path(output_path)
+        save_dir = output_path / "R2_Distributions"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        save_path = save_dir / f"removal_effect_simple_{filename}_{num}.png"
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"图像已保存至: {save_path}")
+    else:
+        plt.show()
+
+    plt.close()
+
+
+
 
 #函数添加了有关R2的分析，没有包含随机策略的分析
 def run_analysis_suite_final_2(base_data_path, output_path, analysis_config):
@@ -634,8 +757,9 @@ def run_analysis_suite_final_2(base_data_path, output_path, analysis_config):
         'fail': 0,
         'deceptive': 0  # 高R2但QC失败
     }
-    MAX_PLOTS_PER_TYPE = 20  # 每种类型最多画几张图
+    MAX_PLOTS_PER_TYPE = 30  # 每种类型最多画几张图
     all_r2_values = []
+    NUM_BOX=31
     for folder in tqdm(data_folders, desc=f"分析 {analysis_type} 文件夹"):
         condition_value = int(re.findall(r'\d+', folder.name)[-1])
         # condition_value = 8000
@@ -689,7 +813,7 @@ def run_analysis_suite_final_2(base_data_path, output_path, analysis_config):
                     r2_ols = calculate_r_squared(signal, fitted_ols)
                     
                     # 执行 QC
-                    qc_passed_ols, r2_value_ols = check_linearity_of_variance2(fitted_ols, residuals_ols, r2_threshold)
+                    qc_passed_ols, r2_value_ols = check_linearity_of_variance2(fitted_ols, residuals_ols, r2_threshold,NUM_BOX)
                     r2_list_ols.append(r2_value_ols)
 
                     tau_ols = ols_params[1]
@@ -715,13 +839,13 @@ def run_analysis_suite_final_2(base_data_path, output_path, analysis_config):
                         qc_plot_counters['fail'] += 1
                     
                     if should_plot:
-                        # pass
-                        # plot_qc_verification2(t_axis, signal, ols_params, 'OLS', qc_passed_ols, r2_ols, output_path, npz_file.name, idx)
-                        plot_qc_verification_combined_finalimg(t_axis, signal, ols_params, 'OLS', qc_passed_ols, r2_ols, output_path, npz_file.name, idx)
-            plot_r2_distribution(r2_list_ols, output_path, npz_file.name, condition_value)
+                        pass
+                        # plot_qc_verification_combined_finalimg(t_axis, signal, ols_params, 'OLS', qc_passed_ols, r2_ols, output_path, npz_file.name, idx)
+            plot_r2_distribution(r2_list_ols, output_path, npz_file.name, condition_value,NUM_BOX)
+            # analyze_removal_effect_simple(data=taus_per_file['OLS'],output_path= output_path,num_trials=1000,filename=npz_file.name)
          
         if all_r2_values:
-            plot_r2_distribution(all_r2_values, output_path, "ALL_FILES_AGGREGATED", "ALL")
+            plot_r2_distribution(all_r2_values, output_path, "ALL_FILES_AGGREGATED", "ALL",NUM_BOX)
   
 
 
@@ -1185,7 +1309,7 @@ def run_analysis_suite_final_4(base_data_path, output_path, analysis_config):
                         
                         if n_removed > 0 and n_qc > 2:
                             std_qc = np.std(qc_taus)
-                            std_rand = simulate_random_removal_stability(all_taus, n_keep=n_qc, num_trials=50)
+                            std_rand = simulate_random_removal_stability(all_taus, n_keep=n_qc, num_trials=1000)
                             std_raw = np.std(all_taus)
                             
                             if not np.isnan(std_rand):
@@ -1435,12 +1559,10 @@ if __name__ == "__main__":
     ]
 
     for config in analysis_configs:
-        run_analysis_suite_final_4(
+        run_analysis_suite_final_2(
             base_data_path=BASE_RAWDATA_PATH,
             output_path=MAIN_OUTPUT_FOLDER,
             analysis_config=config
         )
 
-
-    print("\n所有最终版分析任务已执行完毕！")
 
