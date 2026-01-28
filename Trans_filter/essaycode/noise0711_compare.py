@@ -759,7 +759,7 @@ def run_analysis_suite_final_2(base_data_path, output_path, analysis_config):
     }
     MAX_PLOTS_PER_TYPE = 30  # 每种类型最多画几张图
     all_r2_values = []
-    NUM_BOX=31
+    NUM_BOX=11
     for folder in tqdm(data_folders, desc=f"分析 {analysis_type} 文件夹"):
         condition_value = int(re.findall(r'\d+', folder.name)[-1])
         # condition_value = 8000
@@ -800,18 +800,29 @@ def run_analysis_suite_final_2(base_data_path, output_path, analysis_config):
             qc_plot_counters['fail']=0
             # 初始化r2列表
             r2_list_ols = []
+
+            # 【新增】残差收集容器
+            raw_fitted_values = []
+            raw_residuals = []
+            qc_fitted_values = []
+            qc_residuals = []
+
             for idx, signal in enumerate(signals): # 增加 enumerate 获取索引
                 signal = signal[:condition_value]
-                
+
                 # 1. OLS 拟合与检查
                 ols_params,ols_err = fit_ols(signal, t_axis)
                 if ols_params is not None:
                     fitted_ols = decay_model(t_axis, *ols_params)
                     residuals_ols = signal - fitted_ols
-                    
+
+                    # 【新增】收集原始残差数据
+                    raw_fitted_values.extend(fitted_ols)
+                    raw_residuals.extend(residuals_ols)
+
                     # 计算 R^2
                     r2_ols = calculate_r_squared(signal, fitted_ols)
-                    
+
                     # 执行 QC
                     qc_passed_ols, r2_value_ols = check_linearity_of_variance2(fitted_ols, residuals_ols, r2_threshold,NUM_BOX)
                     r2_list_ols.append(r2_value_ols)
@@ -819,14 +830,18 @@ def run_analysis_suite_final_2(base_data_path, output_path, analysis_config):
                     tau_ols = ols_params[1]
                     taus_per_file['OLS'].append(tau_ols)
                     all_r2_values.append(r2_value_ols)
-                    
 
-                    if qc_passed_ols: taus_per_file['OLS_QC'].append(tau_ols)
+
+                    if qc_passed_ols:
+                        taus_per_file['OLS_QC'].append(tau_ols)
+                        # 【新增】收集QC通过后的残差数据
+                        qc_fitted_values.extend(fitted_ols)
+                        qc_residuals.extend(residuals_ols)
 
                     # --- 核心新增：绘图逻辑 (仅针对 OLS 示例，WLS同理) ---
                     # 只有当我们需要证明观点时才绘图
                     is_deceptive = (r2_ols > 0.995) and (not qc_passed_ols) # 极高R2但QC失败
-                    
+
                     should_plot = False
                     if is_deceptive and qc_plot_counters['deceptive'] < MAX_PLOTS_PER_TYPE:
                         should_plot = True
@@ -837,11 +852,26 @@ def run_analysis_suite_final_2(base_data_path, output_path, analysis_config):
                     elif (not qc_passed_ols) and qc_plot_counters['fail'] < MAX_PLOTS_PER_TYPE:
                         should_plot = True
                         qc_plot_counters['fail'] += 1
-                    
+
                     if should_plot:
                         pass
                         # plot_qc_verification_combined_finalimg(t_axis, signal, ols_params, 'OLS', qc_passed_ols, r2_ols, output_path, npz_file.name, idx)
-            plot_r2_distribution(r2_list_ols, output_path, npz_file.name, condition_value,NUM_BOX)
+
+            # 【新增】绘制残差对比图
+            if len(raw_fitted_values) > 0:
+                plot_residuals_comparison(
+                    raw_fitted=np.array(raw_fitted_values),
+                    raw_residuals=np.array(raw_residuals),
+                    qc_fitted=np.array(qc_fitted_values) if len(qc_fitted_values) > 0 else np.array([]),
+                    qc_residuals=np.array(qc_residuals) if len(qc_residuals) > 0 else np.array([]),
+                    output_path=output_path,
+                    filename=npz_file,
+                    condition_value=condition_value,
+                    method='OLS',
+                    numbox=NUM_BOX
+                )
+
+            # plot_r2_distribution(r2_list_ols, output_path, npz_file.name, condition_value,NUM_BOX)
             # analyze_removal_effect_simple(data=taus_per_file['OLS'],output_path= output_path,num_trials=1000,filename=npz_file.name)
          
         if all_r2_values:
@@ -1524,6 +1554,176 @@ def plot_tau_distribution_comparison(distribution_data, output_path, analysis_co
    
     plt.savefig(output_path / save_name, dpi=150, bbox_inches='tight')
     plt.close(fig)
+
+
+def plot_residuals_comparison(raw_fitted, raw_residuals, qc_fitted, qc_residuals,
+                               output_path, filename, condition_value, method='OLS',numbox=None):
+    """
+    绘制原始 vs QC筛选后的噪声方差 vs 信号强度对比图
+
+    参数:
+    -----------
+    raw_fitted : array-like
+        原始数据的拟合值（强度）
+    raw_residuals : array-like
+        原始数据的残差
+    qc_fitted : array-like
+        QC筛选后数据的拟合值
+    qc_residuals : array-like
+        QC筛选后数据的残差
+    output_path : Path
+        输出路径
+    filename : str
+        NPZ文件名
+    condition_value : int
+        条件值
+    method : str
+        拟合方法名称
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    fig.suptitle(f'{filename} - 噪声方差 vs 信号强度 ({method}, Condition={condition_value})',
+                 fontsize=14, fontweight='bold')
+
+    # 计算原始数据的方差-强度关系
+    
+    binner_raw = np.linspace(np.min(raw_fitted), np.max(raw_fitted), num=numbox + 1)
+    bin_centers_raw, bin_variances_raw = [], []
+    for i in range(len(binner_raw) - 1):
+        indices = np.where((raw_fitted >= binner_raw[i]) & (raw_fitted < binner_raw[i + 1]))[0]
+        if len(indices) > 10:
+            bin_centers_raw.append((binner_raw[i] + binner_raw[i + 1]) / 2)
+            bin_variances_raw.append(np.var(raw_residuals[indices]))
+
+    # 线性拟合原始数据
+    if len(bin_centers_raw) > 2:
+        slope_raw, intercept_raw, r_val_raw, _, _ = linregress(bin_centers_raw, bin_variances_raw)
+        r2_raw = r_val_raw ** 2
+    else:
+        slope_raw, intercept_raw, r2_raw = 0, 0, 0
+
+    # 绘制原始数据图
+    ax1 = axes[0]
+    if len(bin_centers_raw) > 0:
+        # 绘制散点
+        ax1.scatter(bin_centers_raw, bin_variances_raw, c='steelblue', s=80,
+                   marker='o', label='Binned Variance', zorder=3, edgecolors='white', linewidth=1)
+
+        # 绘制回归线
+        x_min_raw, x_max_raw = np.min(bin_centers_raw), np.max(bin_centers_raw)
+        x_range_raw = x_max_raw - x_min_raw if x_max_raw != x_min_raw else 1.0
+        x_start_raw = x_min_raw - x_range_raw * 0.15
+        x_end_raw = x_max_raw + x_range_raw * 0.15
+        line_x_raw = np.array([x_start_raw, x_end_raw])
+        line_y_raw = line_x_raw * slope_raw + intercept_raw
+
+        ax1.plot(line_x_raw, line_y_raw, linestyle='--', color='#D62728',
+                linewidth=2.5, label='Linear Fit', zorder=2)
+
+        # 设置坐标轴范围
+        y_all = np.concatenate((bin_variances_raw, line_y_raw))
+        y_min_raw, y_max_raw = np.min(y_all), np.max(y_all)
+        y_range_raw = y_max_raw - y_min_raw if y_max_raw != y_min_raw else 1.0
+        ax1.set_xlim(x_start_raw, x_end_raw)
+        ax1.set_ylim(y_min_raw - y_range_raw * 0.1, y_max_raw + y_range_raw * 0.1)
+
+        # 添加信息框
+        info_text = (
+            f"原始数据\n"
+            f"n = {len(raw_residuals):,}\n"
+            f"$R^2_{{linear}}$ = {r2_raw:.4f}\n"
+            f"Slope = {slope_raw:.6f}"
+        )
+        if slope_raw < 0:
+            ax1.text(0.04, 0.96, info_text, transform=ax1.transAxes,
+                    ha='left', va='top', fontsize=11,
+                    bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.95, edgecolor='black'))
+        else:
+            ax1.text(0.96, 0.04, info_text, transform=ax1.transAxes,
+                    ha='right', va='bottom', fontsize=11,
+                    bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.95, edgecolor='black'))
+
+    ax1.set_xlabel('信号强度 (Fitted Value)', fontsize=12)
+    ax1.set_ylabel('噪声方差 (Residual Variance)', fontsize=12)
+    ax1.set_title('原始数据', fontsize=13, fontweight='bold')
+    ax1.legend(fontsize=10, loc='upper right')
+    ax1.grid(True, alpha=0.3)
+
+    # 计算QC数据的方差-强度关系
+    ax2 = axes[1]
+    if len(qc_fitted) > 0:
+        nums_box_qc = 10  # QC数据量少，用更少的箱
+        binner_qc = np.linspace(np.min(qc_fitted), np.max(qc_fitted), num=nums_box_qc + 1)
+        bin_centers_qc, bin_variances_qc = [], []
+        for i in range(len(binner_qc) - 1):
+            indices = np.where((qc_fitted >= binner_qc[i]) & (qc_fitted < binner_qc[i + 1]))[0]
+            if len(indices) > 5:  # 降低阈值
+                bin_centers_qc.append((binner_qc[i] + binner_qc[i + 1]) / 2)
+                bin_variances_qc.append(np.var(qc_residuals[indices]))
+
+        # 线性拟合QC数据
+        if len(bin_centers_qc) > 2:
+            slope_qc, intercept_qc, r_val_qc, _, _ = linregress(bin_centers_qc, bin_variances_qc)
+            r2_qc = r_val_qc ** 2
+        else:
+            slope_qc, intercept_qc, r2_qc = 0, 0, 0
+
+        # 绘制QC数据图
+        if len(bin_centers_qc) > 0:
+            ax2.scatter(bin_centers_qc, bin_variances_qc, c='coral', s=100,
+                       marker='o', label='Binned Variance', zorder=3, edgecolors='white', linewidth=1.5)
+
+            # 绘制回归线
+            x_min_qc, x_max_qc = np.min(bin_centers_qc), np.max(bin_centers_qc)
+            x_range_qc = x_max_qc - x_min_qc if x_max_qc != x_min_qc else 1.0
+            x_start_qc = x_min_qc - x_range_qc * 0.15
+            x_end_qc = x_max_qc + x_range_qc * 0.15
+            line_x_qc = np.array([x_start_qc, x_end_qc])
+            line_y_qc = line_x_qc * slope_qc + intercept_qc
+
+            ax2.plot(line_x_qc, line_y_qc, linestyle='--', color='#D62728',
+                    linewidth=2.5, label='Linear Fit', zorder=2)
+
+            # 设置坐标轴范围
+            y_all_qc = np.concatenate((bin_variances_qc, line_y_qc))
+            y_min_qc, y_max_qc = np.min(y_all_qc), np.max(y_all_qc)
+            y_range_qc = y_max_qc - y_min_qc if y_max_qc != y_min_qc else 1.0
+            ax2.set_xlim(x_start_qc, x_end_qc)
+            ax2.set_ylim(y_min_qc - y_range_qc * 0.1, y_max_qc + y_range_qc * 0.1)
+
+            # 添加信息框
+            info_text_qc = (
+                f"QC筛选后\n"
+                f"n = {len(qc_residuals):,}\n"
+                f"$R^2_{{linear}}$ = {r2_qc:.4f}\n"
+                f"Slope = {slope_qc:.6f}\n"
+                f"筛选率 = {(1-len(qc_residuals)/len(raw_residuals))*100:.1f}%"
+            )
+            if slope_qc < 0:
+                ax2.text(0.04, 0.96, info_text_qc, transform=ax2.transAxes,
+                        ha='left', va='top', fontsize=11,
+                        bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.95, edgecolor='black'))
+            else:
+                ax2.text(0.96, 0.04, info_text_qc, transform=ax2.transAxes,
+                        ha='right', va='bottom', fontsize=11,
+                        bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.95, edgecolor='black'))
+    else:
+        ax2.text(0.5, 0.5, 'QC筛选后无数据', ha='center', va='center',
+                fontsize=14, transform=ax2.transAxes)
+
+    ax2.set_xlabel('信号强度 (Fitted Value)', fontsize=12)
+    ax2.set_ylabel('噪声方差 (Residual Variance)', fontsize=12)
+    ax2.set_title('QC筛选后', fontsize=13, fontweight='bold')
+    ax2.legend(fontsize=10, loc='upper right')
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    # 保存图片
+    save_path = output_path / 'variance_vs_intensity_comparison' / f"{filename.stem}_variance_comparison.png"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=200, bbox_inches='tight')
+    plt.close()
+
 
 # --- 6. 运行主程序 ---
 if __name__ == "__main__":
